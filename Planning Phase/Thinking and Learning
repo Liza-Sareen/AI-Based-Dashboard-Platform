@@ -1,0 +1,45 @@
+##### REGISTER SCREEN:
+Why user registers : The user creates an account so the system can identify them and store their information securely.
+Parameters asked in registeration: name, email, password, confirm password, phone, DoB, address
+✔️ Since our website is corporate level, multiple people may have same name; so to uniquely identify the person, we use email.
+✔️ Email: we need validation at the controller level. Validation is also provided at browser, but is prone to attacks.
+✔️ Password: we can implement different rules in password creation like atleast one special character, capital letter, small letter, and number. This is because our database contains company data which we do not want any one to access if passwords are hacked.
+✔️ Confirm password: skip
+✔️ phone: not needed, corporate works with emails 
+✔️ DoB: not needed
+✔️ Address: not needed
+
+TABLE: Users
+⚠️ Always keep id or any column understandable. For example, a table has 2 columns : Id and UId. Now while debugging, anyone can confuse UId with Id, hence use proper names for columns.
+  Suggestion: Id, User_Id (prefer giving context like Booker_Id).
+Name:
+Email:
+PasswordHash: Depending on your tokenization algorithm like Bcrypt, HMASHA256; check if it stores password hash and password salt individually or in one string. 
+Also depending on the algorithm, check the data type of hashed password. In what data type is the hashedPassword returned to the user after tokenization.
+WHY?  Passwords are hashed so that the actual password is not stored in the database.
+      Even if the database is leaked, attackers cannot directly see the original passwords.
+      When the user logs in, the entered password is hashed and compared with the stored hash.
+⚠️ When designing tables, make tables in whimsical, enter fake data as per your rules and check if the rules fail anywhere.
+
+Datatypes:
+1. Id: GUID / ULID/ UUID v7/ Nanoid/ KSUID / Snowflake IDs / Sequential DB IDs + external random public ID / Hash-based IDs / Cryptographically secure random tokens
+2. Name: text/char/varchar
+3. Email: text/char/varchar
+4. PHash: byte/string/depends
+
+###### LOGIN SCREEN:
+Email and PHash
+
+##### Home Screen: Default Dashboard
+requirement of tables: 
+a) authservice needs User table to store data in local storage; clear with logout onclick
+b) For the header in home screen showing the Last updated information of Default Dashboard, we need the table storing information about updation/creation of default dashboard / dashboards; also default column in dashboard is needed.
+c) For all the widgets shown in default dashboard, either they are individually fetched from the widget's table, or they are automatically bought. Also we need the layout to set how to fetch these widgets.
+
+#### Dashboards Screen: All dashboards
+requirement of tables: 
+a) To show all the dashboards, I need all dashboard data from dashboards.
+b) If using notifications, I need notifications table.
+
+#### AI Builder Screen: 
+Except notifications and user name, no other data is required in this screen.
