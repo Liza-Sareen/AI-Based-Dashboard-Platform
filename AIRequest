@@ -1,0 +1,9 @@
+namespace Application.DTOs;
+
+public class AIRequest
+{
+    public string prompt { get; set; } = string.Empty;
+    public bool isClarificationAns { get; set; }
+    public Guid widgetId { get; set; } = Guid.Empty;
+    public Guid dashboardId { get; set; }
+}
