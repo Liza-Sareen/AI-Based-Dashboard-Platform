@@ -1,0 +1,113 @@
+using Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+
+namespace DashboardProject.Infrastructure.Persistence;
+
+public class ApplicationDbContext : DbContext
+{
+    public ApplicationDbContext(
+        DbContextOptions<ApplicationDbContext> options
+    ) : base(options)
+    {
+    }
+
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Dashboard> Dashboards => Set<Dashboard>();
+    public DbSet<Widget> Widgets => Set<Widget>();
+    public DbSet<Insight> InsightsTable => Set<Insight>();
+    public DbSet<VersionHistory> VersionHistories => Set<VersionHistory>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Prompt> Prompts => Set<Prompt>();
+    public DbSet<Group> Groups => Set<Group>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(u => u.TableId);
+
+            entity.HasIndex(u => u.Email)
+                  .IsUnique();
+            entity.HasOne<Group>()
+            .WithMany()
+            .HasForeignKey(u => u.GroupId)
+            .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<Widget>(entity =>
+        {
+            entity.HasKey(w => w.TableId);
+
+            // Widget -> Dashboard
+            entity.HasOne(w => w.Dashboards)
+                  .WithMany(d => d.Widgets)
+                  .HasForeignKey(w => w.DashboardID)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+
+        modelBuilder.Entity<Insight>(entity =>
+        {
+            entity.HasKey(i => i.TableId);
+
+            // Insight -> Dashboard (many insights belong to one dashboard)
+            entity.HasOne(i => i.Dashboard)
+                .WithMany(d => d.Insights)
+                .HasForeignKey(i => i.DashboardId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<VersionHistory>(entity =>
+        {
+            entity.HasKey(v => v.TableId);
+        });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasKey(a => a.TableId);
+        });
+
+        modelBuilder.Entity<Dashboard>(entity =>
+        {
+            entity.HasKey(d => d.TableId);
+            entity.Property(d => d.style)
+                .HasConversion<string>();
+            entity.Property(d => d.Authority)
+                .HasConversion<string>();
+            entity.HasOne(d => d.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(d => d.CreatedBy)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(d => d.SharerGroup)
+                .WithMany()
+                .HasForeignKey(d => d.SharerGroupId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<Prompt>(entity =>
+        {
+            entity.ToTable("Prompts");
+ 
+            entity.HasKey(p => p.PromptId);
+ 
+            entity.Property(p => p.PromptText)
+                  .IsRequired()
+                  .HasMaxLength(2000);
+ 
+            entity.Property(p => p.StoreResult)
+                  .HasColumnType("json")
+                  .HasDefaultValueSql("'{}'::json");
+ 
+            entity.HasIndex(p => new { p.WidgetId, p.CreatedAt });
+        });
+
+        modelBuilder.Entity<Group>(entity =>
+        {
+            entity.HasKey(g => g.TableId);
+        });
+
+        
+    }
+}
