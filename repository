@@ -1,0 +1,72 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using DashboardProject.Infrastructure.Persistence;
+using Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+
+public class AIRepository : IAIRepository
+{
+    private readonly ApplicationDbContext _context;
+    private readonly HttpClient _httpClient;
+    private readonly string _baseUrl;
+    private readonly string _model;
+
+    public AIRepository(ApplicationDbContext context, HttpClient httpClient, IConfiguration configuration)
+    {
+        _context = context;
+        _httpClient = httpClient;
+        _httpClient.Timeout = TimeSpan.FromMinutes(5);
+        _baseUrl = configuration["OllamaSettings:BaseUrl"] ?? "http://10.254.252.59:11434";
+        _model = configuration["OllamaSettings:Model"] ?? "ministral-3:8b-instruct-2512-q8_0";
+    }
+
+    public async Task<string?> getAIResponseAsync(string prompt)
+    {
+        var body = new
+        {
+            model = _model,
+            messages = new[] { new { role = "user", content = prompt } },
+            stream = false
+        };
+
+        var response = await _httpClient.PostAsJsonAsync($"{_baseUrl}/api/chat", body);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Exception($"AI API failed: {(int)response.StatusCode} {response.StatusCode}");
+        }
+
+        using var parsedJson = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        return parsedJson.RootElement.GetProperty("message").GetProperty("content").GetString();
+    }
+
+    public async Task<List<Prompt>> GetPromptsByWidgetIdAsync(Guid widgetId)
+    {
+        return await _context.Prompts
+            .Where(p => p.WidgetId == widgetId)
+            .OrderBy(p => p.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task AddPromptAsync(Guid promptId, Guid widgetId, string promptText, string storeResult)
+    {
+        _context.Prompts.Add(new Prompt
+        {
+            PromptId = promptId,
+            WidgetId = widgetId,
+            PromptText = promptText,
+            StoreResult = JsonDocument.Parse(storeResult)
+        });
+
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<Guid> CreateWidgetAsync(Widget widget)
+    {
+        _context.Widgets.Add(widget);
+        await _context.SaveChangesAsync();
+        return widget.TableId;
+    }
+}
