@@ -1,0 +1,98 @@
+using System.Security.Claims;
+using Application.DTOs;
+using Application.Interfaces;
+using DashboardProject.Application.Common.Exceptions;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class AIController : ControllerBase
+{
+    private const int MaxPromptLength = 1000;
+
+    private readonly IAIService _aiService;
+    private readonly IDashboardRepository _dashboardRepository;
+    private readonly ILogger<AIController> _logger;
+
+    public AIController(
+        IAIService aiService,
+        IDashboardRepository dashboardRepository,
+        ILogger<AIController> logger)
+    {
+        _aiService = aiService;
+        _dashboardRepository = dashboardRepository;
+        _logger = logger;
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<AIResponse>> GetResponse(AIRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.prompt))
+        {
+            return BadRequest("Prompt cannot be empty.");
+        }
+
+        if (request.prompt.Length > MaxPromptLength * 2)
+        {
+            return BadRequest($"Prompt is too long. Maximum {MaxPromptLength} characters are allowed.");
+        }
+
+        if (request.dashboardId == Guid.Empty)
+        {
+            return BadRequest("DashboardId is required.");
+        }
+
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            return Unauthorized();
+        }
+
+        var dashboard = await _dashboardRepository.GetDashboardByIdAsync(request.dashboardId, userId);
+        if (dashboard == null)
+        {
+            return Forbid();
+        }
+
+        Guid widgetId;
+
+        if (!request.isClarificationAns)
+        {
+            widgetId = Guid.NewGuid();
+        }
+        else
+        {
+            if (request.widgetId == Guid.Empty)
+            {
+                return BadRequest("WidgetId is required for a clarification answer.");
+            }
+
+            widgetId = request.widgetId;
+        }
+
+        var promptId = Guid.NewGuid();
+
+        try
+        {
+            var response = await _aiService.GetResponse(
+                request.prompt,
+                promptId,
+                widgetId,
+                request.dashboardId,
+                request.isClarificationAns
+            );
+
+            return Ok(response);
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(ex.Errors);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AI widget generation failed for dashboard {DashboardId}", request.dashboardId);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Something went wrong while generating the widget.");
+        }
+    }
+}
