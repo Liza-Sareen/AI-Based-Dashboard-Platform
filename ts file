@@ -1,0 +1,351 @@
+import { Component, OnInit, Signal, signal, WritableSignal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+import { NgApexchartsModule } from 'ng-apexcharts';
+import { SidebarComponent } from '../sidebar/sidebar';
+import { DashboardService } from '../../core/services/dashboards.service';
+import { chartOptions, Dashboard, WidgetConfig, Widgets } from '../../core/models/Home.model';
+import { WidgetService } from '../../core/services/widget.service';
+import { AIService } from '../../core/services/ai.service';
+import { AIRequest } from '../../core/models/AI.model';
+import { DASHBOARD_THEMES, DashboardTheme } from '../../core/models/theme.model';
+
+export interface ChatMessage {
+  sender: 'user' | 'assistant';
+  text: string;
+  sql?: string;
+  isProcessing? : boolean //because timer was converting to string, so merged in html only
+}
+
+export interface SelectedWidgetState {
+  title: string;
+  cardType: string;
+  chartType: NonNullable<chartOptions['chart']['type']>;
+  metric: string;
+  dimension: string;
+}
+
+export interface PreviewWidget {
+  cardType: string;
+  title: string;
+  value?: number;            
+  labels?: string[];           
+  values?: number[];           
+  chartOptions?: chartOptions; 
+}
+
+@Component({
+  selector: 'app-builder',
+  standalone: true,
+  imports: [CommonModule, FormsModule, NgApexchartsModule, SidebarComponent],
+  templateUrl: './smart-builder-prompt.html',
+  styleUrls: ['./smart-builder-prompt.css']
+})
+
+export class SmartBuilderPromptComponent implements OnInit {
+  protected dashboardId: string = '';
+  private readonly emptyGuid: string = '00000000-0000-0000-0000-000000000000';
+  protected pendingWidgetId: string = this.emptyGuid;
+  protected promptInput: string = '';
+  protected showSaveButton: boolean = false;
+  protected widgetTitle: string = 'Generated Visualizer';
+  protected dashboard: WritableSignal<Dashboard | null> = signal(null);
+  protected dashboardName: WritableSignal<string | null> = signal(null);
+  protected Widget: WritableSignal<Widgets | null> = signal(null);
+  protected widgetConfig: WritableSignal<PreviewWidget[]> = signal([]);
+  protected widgetHeight: WritableSignal<number> = signal(350);
+  protected widgetId: string = '';
+  protected showInspector: boolean = false;
+  protected rawJsonConfig: WidgetConfig | null = null;
+  protected totalTime : WritableSignal<number> = signal(35);
+  protected activeTheme: WritableSignal<DashboardTheme> = signal(DASHBOARD_THEMES.POWERBI);
+  protected earlyResponse : boolean = false;
+  protected TimerIsRunning: boolean = false;
+
+  protected selectedWidget: SelectedWidgetState = {
+    title: '',
+    cardType: '',
+    chartType: 'bar',
+    metric: '',
+    dimension: ''
+  };
+
+  chatHistory: ChatMessage[] = [
+    {
+      sender: 'assistant',
+      text: 'Ask me to generate custom SQL widgets or charts for this dashboard!',
+    }
+  ];
+
+  constructor(
+    private aIService: AIService,
+    private widgetService: WidgetService,
+    private dashboardService: DashboardService,
+    private route: ActivatedRoute,
+    private router: Router
+  ) {}
+
+  ngOnInit(): void {
+    this.dashboardId = this.route.snapshot.paramMap.get('id')!;
+
+    this.dashboardService.getDashboardById(this.dashboardId).subscribe({
+      next: (response) => {
+        this.dashboard.set(response);
+        this.dashboardName.set(response.dashboardName);
+        console.log(this.dashboardName)
+        this.applyTheme(response.style, response.customTheme);
+      },
+      error: (err) => {
+        console.log('Error loading dashboard:', err);
+      }
+    });
+  }
+
+  private applyTheme(style: string, customTheme?: string): void {
+    const key = style.toUpperCase();
+
+    if (key === 'CUSTOM' && customTheme) {
+      this.activeTheme.set(JSON.parse(customTheme));
+      return;
+    }
+
+    this.activeTheme.set(DASHBOARD_THEMES[key as 'POWERBI' | 'GRAFANA'] ?? DASHBOARD_THEMES['POWERBI']);
+  }
+
+
+  sendPrompt(): void {
+    if (!this.promptInput.trim()) return;
+    const prompt = this.promptInput.trim();
+    this.chatHistory.push({ sender: 'user', text: prompt });
+    this.chatHistory.push({ sender: 'assistant', text: "Your Prompt is being processed by AI. Response expected in", isProcessing: true});
+    this.reduceTimer(35);
+    this.promptInput = '';
+    const isClarification = this.pendingWidgetId !== this.emptyGuid;
+
+    const request: AIRequest = {
+      prompt,
+      isClarificationAns: isClarification,
+      widgetId: this.pendingWidgetId,
+      dashboardId: this.dashboardId
+    };
+
+    this.aIService.getResponse(request).subscribe({
+      next: (response) => {
+        if(this.TimerIsRunning){
+          this.TimerIsRunning = false;
+          this.earlyResponse = true;
+          this.chatHistory.push({
+            sender: 'assistant',
+            text: "You got an early response!"
+          });
+        }
+        if (response.clarificationQuestion) {
+          this.pendingWidgetId = response.widgetId;
+          this.chatHistory.push({
+            sender: 'assistant',
+            text: response.clarificationQuestion
+          });
+          return;
+        }
+
+        this.pendingWidgetId = this.emptyGuid;
+
+        if (response.widgetResponse) {
+          this.handleWidgetResponse(response.widgetResponse);
+        }
+      },
+      error: (err) => {
+        console.log('Error receiving prompt reply:', err);
+        this.TimerIsRunning = false;
+
+        if (err?.status === 400) {
+          this.pendingWidgetId = this.emptyGuid;
+        }
+
+        this.chatHistory.push({
+          sender: 'assistant',
+          text: this.getErrorMessage(err)
+        });
+      }
+    });
+  }
+
+  private getErrorMessage(err: any): string {
+    const body = err?.error;
+
+    if (typeof body === 'string' && body.trim()) return body;
+    if (Array.isArray(body) && body.length > 0) return body.join(' ');
+    if (typeof body?.title === 'string' && body.title.trim()) return body.title;
+
+    return 'Something went wrong while generating the widget. Please try again.';
+  }
+
+  private handleWidgetResponse(widgetResponse: string): void {
+    try {
+      const parsedJson = JSON.parse(widgetResponse);
+
+      this.chatHistory.push({
+        sender: 'assistant',
+        text: parsedJson.sql || 'Widget generated successfully.',
+        sql: parsedJson.sql
+      });
+
+      this.widgetId = parsedJson.widgetId;
+      if (!this.widgetId) return;
+
+      this.widgetService.getWidgetById(this.widgetId).subscribe({
+        next: (response) => {
+          this.Widget.set(response);
+          this.getConfiguration(response);
+          this.showSaveButton = true;
+          this.showInspector = true;
+        },
+        error: (err) => {
+          console.log('Error fetching widget:', err);
+        }
+      });
+    } catch (error) {
+      console.log('Error parsing widget response:', error);
+    }
+  }
+
+  toggleInspector(): void {
+    this.showInspector = !this.showInspector;
+  }
+
+  getConfiguration(config: Widgets): void {
+    try {
+      const jsonConfig: WidgetConfig = JSON.parse(config.configuration);
+      this.rawJsonConfig = jsonConfig;
+
+      this.selectedWidget = {
+        title: jsonConfig.title || 'Generated Visualizer',
+        cardType: jsonConfig.widget === 'card' ? 'kpi' : (jsonConfig.widget || 'chart'),
+        chartType: jsonConfig.chartType || 'bar',
+        metric: config.metrics?.[0] || '',
+        dimension: config.dimensions?.[0] || ''
+      };
+
+      this.ConfigToApexInputFormat();
+    } catch (error) {
+      console.log('Error parsing configuration model:', error);
+    }
+  }
+
+  updateWidgetPreview(): void {
+    if (!this.rawJsonConfig) return;
+    this.ConfigToApexInputFormat();
+  }
+
+  private ConfigToApexInputFormat(): void {
+    if (!this.rawJsonConfig) return;
+    const title = this.selectedWidget.title;
+    const cardType = this.selectedWidget.cardType;
+
+    // KPI — no chart
+    if (cardType === 'kpi') {
+      this.widgetConfig.set([
+        {
+          cardType: 'kpi',
+          title,
+          value: this.rawJsonConfig.values?.[0] ?? 0
+        }
+      ]);
+      return;
+    }
+
+    // Table — no chart
+    if (cardType === 'table') {
+      this.widgetConfig.set([
+        {
+          cardType: 'table',
+          title,
+          labels: this.rawJsonConfig.labels || [],
+          values: this.rawJsonConfig.values || []
+        }
+      ]);
+      return;
+    }
+
+    // Chart
+    const chartType = this.selectedWidget.chartType;
+    const theme = this.activeTheme();
+    const palette = theme.chartPalette;
+    const isDark = theme !== DASHBOARD_THEMES.POWERBI;
+
+    let chartOpts: chartOptions;
+
+    if (chartType === 'pie' || chartType === 'donut') {
+      chartOpts = {
+        title: title,
+        series: this.rawJsonConfig.values || [],
+        chart: {
+          type: chartType,
+          height: this.widgetHeight(),
+          background: 'transparent'
+        },
+        labels: this.rawJsonConfig.labels || [],
+        colors: palette,
+        theme: { mode: isDark ? 'dark' : 'light' }
+      };
+    } else {
+      const data = (this.rawJsonConfig.labels ?? []).map((label, index) => ({
+        x: label,
+        y: Number(this.rawJsonConfig?.values?.[index] ?? 0)
+      }));
+
+      chartOpts = {
+        title: title,
+        series: [
+          {
+            name: this.selectedWidget.metric || title,
+            data
+          }
+        ],
+        chart: {
+          type: chartType,
+          height: this.widgetHeight(),
+          background: 'transparent'
+        },
+        colors: palette,
+        theme: { mode: isDark ? 'dark' : 'light' }
+      };
+    }
+
+    this.widgetConfig.set([{ cardType: 'chart', title, chartOptions: chartOpts }]);
+  }
+
+  saveAndProceed(): void {
+    this.router.navigate(['/viewingScreen', this.dashboardId]);
+  }
+
+  goBack(): void {
+    this.router.navigate(['/builder']);
+  }
+
+  DeleteWidget(){
+    this.widgetService.deleteWidget(this.widgetId).subscribe({
+      next : Response => {
+        alert('Widget deleted');
+      },
+      error : err => {
+        console.log("Found this error while deleting widget: ",err);
+      }
+    })
+  }
+
+  reduceTimer(time:number){
+    this.totalTime.set(time);
+    this.TimerIsRunning = true;
+    const interval = setInterval(() => {
+      if(this.totalTime() <=0 ){
+        clearInterval(interval);
+        return;
+      }
+      else if(this.earlyResponse){ return;}
+      this.totalTime.set(this.totalTime()-1);
+    },1000);
+  }
+
+}
