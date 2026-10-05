@@ -1,0 +1,23 @@
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../../environments/env';
+import { AIRequest,AIResponse } from '../models/AI.model';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class AIService {
+
+  private readonly apiUrl = `${environment.apiUrl}/AI`;
+  // Replace xxxx with your ASP.NET API port.
+
+  constructor(private http: HttpClient) {}
+
+  getResponse(request: AIRequest): Observable<AIResponse> {
+    return this.http.post<AIResponse>(
+      this.apiUrl,
+      request
+    );
+  }
+}
