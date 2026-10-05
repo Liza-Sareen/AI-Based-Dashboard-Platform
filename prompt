@@ -1,0 +1,12 @@
+using System.Text.Json;
+
+namespace Domain.Entities;
+
+public class Prompt
+{
+    public Guid PromptId { get; set; }
+    public Guid WidgetId { get; set; }
+    public string PromptText { get; set; } = string.Empty;
+    public JsonDocument StoreResult { get; set; } = JsonDocument.Parse("{}");
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
