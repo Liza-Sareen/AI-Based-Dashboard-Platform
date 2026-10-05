@@ -1,0 +1,9 @@
+namespace Application.DTOs;
+
+public class AIResponse
+{
+    public string? clarificationQuestion { get; set; }
+    public Guid promptId { get; set; }
+    public Guid widgetId { get; set; }
+    public string? WidgetResponse { get; set; }
+}
